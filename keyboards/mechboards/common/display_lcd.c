@@ -50,6 +50,54 @@
 #ifndef ROBOT_RECORD_COOLDOWN_MS
 #    define ROBOT_RECORD_COOLDOWN_MS 8000 // minimum time between two celebrations
 #endif
+#ifndef ROBOT_SLEEP_FRAME_MS
+#    define ROBOT_SLEEP_FRAME_MS 900 // the sleeping robot alternates "z" and "zZ"
+#endif
+#ifndef ROBOT_OOPS_MS
+#    define ROBOT_OOPS_MS 1000 // 3+ Backspaces in a row, no key for this long -> oops pose ends
+#endif
+#ifndef ROBOT_OOPS_FRAME_MS
+#    define ROBOT_OOPS_FRAME_MS 150
+#endif
+#ifndef ROBOT_SHORTCUT_FRAME_MS
+#    define ROBOT_SHORTCUT_FRAME_MS 250 // Ctrl / Alt / Gui held
+#endif
+#ifndef ROBOT_STARTLED_MS
+#    define ROBOT_STARTLED_MS 600 // jump when the first key hits a sleeping robot
+#endif
+#ifndef ROBOT_STARTLED_FRAME_MS
+#    define ROBOT_STARTLED_FRAME_MS 150
+#endif
+#ifndef ROBOT_MILESTONE_KEYS
+#    define ROBOT_MILESTONE_KEYS 1000 // confetti every this many key presses
+#endif
+#ifndef ROBOT_CONFETTI_MS
+#    define ROBOT_CONFETTI_MS 3000
+#endif
+#ifndef ROBOT_CONFETTI_FRAME_MS
+#    define ROBOT_CONFETTI_FRAME_MS 200
+#endif
+#ifndef ROBOT_ACTIVITY_FROM_MS
+#    define ROBOT_ACTIVITY_FROM_MS 10000 // idle this long -> coffee / reading (alternating)
+#endif
+#ifndef ROBOT_ACTIVITY_FRAME_MS
+#    define ROBOT_ACTIVITY_FRAME_MS 700
+#endif
+#ifndef ROBOT_YAWN_FROM_MS
+#    define ROBOT_YAWN_FROM_MS 25000 // idle this long -> yawn, then sleep at ROBOT_SLEEP_MS
+#endif
+#ifndef ROBOT_YAWN_FRAME_MS
+#    define ROBOT_YAWN_FRAME_MS 500
+#endif
+#ifndef BALANCE_WINDOW_KEYS
+#    define BALANCE_WINDOW_KEYS 200 // hand balance covers roughly the last 100-200 key presses
+#endif
+#ifndef IDLE_DIM_MS
+#    define IDLE_DIM_MS 60000 // no input for this long: dim screens and key lighting
+#endif
+#ifndef IDLE_OFF_MS
+#    define IDLE_OFF_MS 300000 // no input for this long: screens and key lighting off
+#endif
 #ifndef ROBOT_ULTRA_WPM
 #    define ROBOT_ULTRA_WPM 80 // at or above this WPM: ultra-fast turbo mode (glitching robot, pink pupils, 2 frames)
 #endif
@@ -136,6 +184,18 @@ static uint16_t      history_keys_drawn = 0xFFFF;
 static uint8_t       robot_pose = ROBOT_POSE_IDLE;
 static uint8_t       robot_pose_drawn = 0xFF;
 static uint16_t      robot_keys_seen;
+static bool          robot_first_update = true;
+static uint32_t      robot_startled_until;
+static uint32_t      robot_confetti_until;
+static uint8_t       robot_idle_activity;     // toggles on every key press: coffee / reading
+static volatile uint8_t hand_left_pct = 50;   // share of left-hand key presses (rolling), master computes, slave synced
+static uint16_t      hand_left_cnt;
+static uint16_t      hand_right_cnt;
+static uint8_t       balance_drawn = 0xFF;
+static uint8_t       idle_stage;               // 0 awake, 1 dimmed, 2 off
+static uint8_t       saved_bl_level;
+static uint8_t       saved_rgb_val;
+static bool          saved_rgb_on;
 static uint32_t      robot_last_key_time;
 static uint32_t      robot_press_until;
 static uint32_t      robot_happy_until;
@@ -299,7 +359,9 @@ void draw_wpm_text(void) {
     qp_rect(surface, 0, 75, LCD_WIDTH - 1, 75 + pixellari_18->line_height + pixellari_24->line_height, 0, 0, 0, true);
     drawtext_centered_recolor(surface, 0, 75, 67, pixellari_18, "UPTIME", 0, 0, 150, 0, 0, 0);
     drawtext_centered_recolor(surface, 68, 75, 67, pixellari_18, "BKSP", ui_hsv.h, ui_hsv.s, ui_hsv.v / 2, 0, 0, 0);
-    if (up >= 3600) {
+    if (up >= 172800) {
+        snprintf(buffer, sizeof(buffer), "%lud%02lu", (unsigned long)(up / 86400), (unsigned long)((up / 3600) % 24));
+    } else if (up >= 3600) {
         snprintf(buffer, sizeof(buffer), "%luh%02lu", (unsigned long)(up / 3600), (unsigned long)((up / 60) % 60));
     } else {
         snprintf(buffer, sizeof(buffer), "%lu:%02lu", (unsigned long)(up / 60), (unsigned long)(up % 60));
@@ -319,9 +381,9 @@ void draw_wpm_text(void) {
 static const struct {
     const char *label;
     uint8_t     mask;
-} mod_cells[4] = {{"SFT", MOD_MASK_SHIFT}, {"CTL", MOD_MASK_CTRL}, {"ALT", MOD_MASK_ALT}, {"GUI", MOD_MASK_GUI}};
+} mod_cells[4] = {{"SFT", MOD_MASK_SHIFT}, {"CTL", MOD_MASK_CTRL}, {"ALT", MOD_MASK_ALT}, {"SUP", MOD_MASK_GUI}};
 
-#    define MOD_ROW_Y 186
+#    define MOD_ROW_Y 216
 #    define MOD_ROW_H 21
 
 static uint8_t mods_drawn = 0xFF;
@@ -351,6 +413,23 @@ void draw_mods(bool force) {
         }
     }
     mods_drawn = mods;
+}
+
+// Left / right hand balance: percentages above a bar, tick at 50 %.
+static void draw_balance(void) {
+    char    buffer[16];
+    uint8_t left = hand_left_pct;
+    qp_rect(surface, 0, 184, LCD_WIDTH - 1, 212, 0, 0, 0, true);
+    snprintf(buffer, sizeof(buffer), "L %d%%", left);
+    qp_drawtext_recolor(surface, 0, 184, pixellari_18, buffer, ui_hsv.h, ui_hsv.s, ui_hsv.v, 0, 0, 0);
+    snprintf(buffer, sizeof(buffer), "R %d%%", 100 - left);
+    drawtext_right_recolor(surface, 184, LCD_WIDTH, pixellari_18, buffer, 0, 0, 150, 0, 0, 0);
+    qp_rect(surface, 0, 204, LCD_WIDTH - 1, 211, ui_hsv.h, ui_hsv.s, ui_hsv.v / 4, false);
+    if (left > 0) {
+        qp_rect(surface, 0, 204, (LCD_WIDTH * left) / 100 - 1, 211, ui_hsv.h, ui_hsv.s, ui_hsv.v, true);
+    }
+    qp_line(surface, LCD_WIDTH / 2, 202, LCD_WIDTH / 2, 213, 0, 0, 255);
+    balance_drawn = left;
 }
 #else
 void draw_wpm_text(void) {
@@ -561,24 +640,58 @@ static void robot_update_pose(void) {
     uint8_t  wpm = get_current_wpm();
 
     uint16_t keys = robot_keys;
+    if (robot_first_update) { // start awake, and do not celebrate keys counted before this half was ready
+        robot_first_update  = false;
+        robot_keys_seen     = keys;
+        robot_last_key_time = now;
+    }
     if (keys != robot_keys_seen) {
+        if (robot_pose == ROBOT_POSE_SLEEP_A || robot_pose == ROBOT_POSE_SLEEP_B) {
+            robot_startled_until = now + ROBOT_STARTLED_MS; // woken up by a key
+        }
+        if (keys / ROBOT_MILESTONE_KEYS > robot_keys_seen / ROBOT_MILESTONE_KEYS) {
+            robot_confetti_until = now + ROBOT_CONFETTI_MS;
+        }
         robot_keys_seen     = keys;
         robot_last_key_time = now;
         robot_press_until   = now + ROBOT_PRESS_MS;
+        robot_idle_activity ^= 1;
     }
 
-    if (now < robot_happy_until) {
+    uint32_t idle   = now - robot_last_key_time;
+    bool     oops   = (key_history[0] & 0x7F) == KC_BSPC && (key_history[1] & 0x7F) == KC_BSPC && (key_history[2] & 0x7F) == KC_BSPC && idle < ROBOT_OOPS_MS;
+    bool     combo  = ((get_mods() | get_oneshot_mods()) & (MOD_MASK_CTRL | MOD_MASK_ALT | MOD_MASK_GUI)) != 0;
+    bool     typing = idle < 700;
+
+    if (now < robot_confetti_until) {
+        robot_pose = ((now / ROBOT_CONFETTI_FRAME_MS) & 1) ? ROBOT_POSE_CONFETTI_B : ROBOT_POSE_CONFETTI_A;
+    } else if (now < robot_happy_until) {
         robot_pose = ((now / ROBOT_HAPPY_FRAME_MS) & 1) ? ROBOT_POSE_HAPPY_B : ROBOT_POSE_HAPPY_A;
-    } else if (wpm >= ROBOT_ULTRA_WPM && now - robot_last_key_time < 700) {
+    } else if (now < robot_startled_until) {
+        robot_pose = ((now / ROBOT_STARTLED_FRAME_MS) & 1) ? ROBOT_POSE_STARTLED_B : ROBOT_POSE_STARTLED_A;
+    } else if (oops) {
+        robot_pose = ((now / ROBOT_OOPS_FRAME_MS) & 1) ? ROBOT_POSE_OOPS_B : ROBOT_POSE_OOPS_A;
+    } else if (combo) {
+        robot_pose = ((now / ROBOT_SHORTCUT_FRAME_MS) & 1) ? ROBOT_POSE_SHORTCUT_B : ROBOT_POSE_SHORTCUT_A;
+    } else if (wpm >= ROBOT_ULTRA_WPM && typing) {
         robot_pose = ((now / ROBOT_ULTRA_FRAME_MS) & 1) ? ROBOT_POSE_ULTRA_B : ROBOT_POSE_ULTRA_A;
-    } else if (wpm >= ROBOT_FAST_WPM && now - robot_last_key_time < 700) {
+    } else if (wpm >= ROBOT_FAST_WPM && typing) {
         robot_pose = ((now / ROBOT_FAST_FRAME_MS) & 1) ? ROBOT_POSE_FAST_B : ROBOT_POSE_FAST_A; // hands take turns
-    } else if (wpm >= ROBOT_MEDIUM_WPM && now - robot_last_key_time < 700) {
+    } else if (wpm >= ROBOT_MEDIUM_WPM && typing) {
         robot_pose = ((now / ROBOT_MED_FRAME_MS) & 1) ? ROBOT_POSE_MED_B : ROBOT_POSE_MED_A; // steady typing loop
     } else if (now < robot_press_until) {
         robot_pose = robot_last_hand ? ROBOT_POSE_TYPE_R : ROBOT_POSE_TYPE_L;
-    } else if (now - robot_last_key_time > ROBOT_SLEEP_MS) {
-        robot_pose = ROBOT_POSE_SLEEP;
+    } else if (idle > ROBOT_SLEEP_MS) {
+        robot_pose = ((now / ROBOT_SLEEP_FRAME_MS) & 1) ? ROBOT_POSE_SLEEP_B : ROBOT_POSE_SLEEP_A; // z / zZ
+    } else if (idle >= ROBOT_YAWN_FROM_MS) {
+        robot_pose = ((now / ROBOT_YAWN_FRAME_MS) & 1) ? ROBOT_POSE_YAWN_B : ROBOT_POSE_YAWN_A;
+    } else if (idle >= ROBOT_ACTIVITY_FROM_MS) {
+        bool second = ((now / ROBOT_ACTIVITY_FRAME_MS) & 1) != 0;
+        if (robot_idle_activity) {
+            robot_pose = second ? ROBOT_POSE_COFFEE_B : ROBOT_POSE_COFFEE_A;
+        } else {
+            robot_pose = second ? ROBOT_POSE_READ_B : ROBOT_POSE_READ_A;
+        }
     } else {
         if (now >= robot_next_blink) {
             robot_blink_until = now + 150;
@@ -608,18 +721,26 @@ static void robot_task(void) {
 //----------------------------------------------------------
 // Right display on layers 1 / 2: history of the last typed keys.
 
-// Short label for a HID keycode; returns false for keys that are not shown.
-static bool key_label(uint8_t kc, char *out) {
+// Short label for a stored history code: HID keycode in bits 0-6, bit 7 = Shift was held (US layout).
+// Returns false for keys that are not shown.
+static bool key_label(uint8_t code, char *out) {
     static const char *const names[] = {
         [KC_ENTER - KC_ENTER] = "ENT", "ESC", "BSP", "TAB", "SPC", "-", "=", "[", "]", "\\", "#", ";", "'", "`", ",", ".", "/", "CAP",
         "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12", "PRT", "SCR", "PAU", "INS", "HOM", "PGU", "DEL", "END", "PGD", "RGT", "LFT", "DWN", "UP",
     };
+    static const char *const shifted_symbols[] = {"_", "+", "{", "}", "|", "~", ":", "\"", "~", "<", ">", "?"}; // KC_MINUS .. KC_SLASH
+    const char                shifted_digits[]  = ")!@#$%^&*(";                                                 // KC_0, KC_1 .. KC_9
+    uint8_t                   kc                = code & 0x7F;
+    bool                      shift             = (code & 0x80) != 0;
     if (kc >= KC_A && kc <= KC_Z) {
-        out[0] = 'A' + (kc - KC_A);
+        out[0] = (shift ? 'A' : 'a') + (kc - KC_A);
         out[1] = 0;
     } else if (kc >= KC_1 && kc <= KC_0) {
-        out[0] = kc == KC_0 ? '0' : '1' + (kc - KC_1);
-        out[1] = 0;
+        uint8_t n = (kc == KC_0) ? 0 : (kc - KC_1 + 1); // 0-9
+        out[0]    = shift ? shifted_digits[n] : '0' + n;
+        out[1]    = 0;
+    } else if (shift && kc >= KC_MINUS && kc <= KC_SLASH) {
+        strcpy(out, shifted_symbols[kc - KC_MINUS]);
     } else if (kc >= KC_ENTER && kc < KC_ENTER + sizeof(names) / sizeof(names[0])) {
         strcpy(out, names[kc - KC_ENTER]);
     } else {
@@ -660,6 +781,40 @@ static void history_task(void) {
     }
 }
 
+// Dim, then switch off, the screens (every half) and the key lighting (master only: the
+// RGB settings are synced to the other half) after a period without input; wake on any key.
+static void idle_task(void) {
+    uint32_t idle = last_input_activity_elapsed();
+    uint8_t  want = idle >= IDLE_OFF_MS ? 2 : (idle >= IDLE_DIM_MS ? 1 : 0);
+    if (want == idle_stage) {
+        return;
+    }
+    if (idle_stage == 0) { // leaving the awake state: remember the user's settings
+        saved_bl_level = get_backlight_level();
+        saved_rgb_val  = rgb_matrix_get_val();
+        saved_rgb_on   = rgb_matrix_is_enabled();
+    }
+    uint8_t level = saved_bl_level;
+    if (want == 1) {
+        level = saved_bl_level >= 2 ? 1 : saved_bl_level;
+    } else if (want == 2) {
+        level = 0;
+    }
+    backlight_level_noeeprom(level);
+    if (is_keyboard_master() && saved_rgb_on) {
+        if (want == 0) {
+            rgb_matrix_enable_noeeprom();
+            rgb_matrix_sethsv_noeeprom(rgb_matrix_get_hue(), rgb_matrix_get_sat(), saved_rgb_val);
+        } else if (want == 1) {
+            rgb_matrix_enable_noeeprom();
+            rgb_matrix_sethsv_noeeprom(rgb_matrix_get_hue(), rgb_matrix_get_sat(), saved_rgb_val / 4);
+        } else {
+            rgb_matrix_disable_noeeprom();
+        }
+    }
+    idle_stage = want;
+}
+
 // Track the session top speed; a new record (above ROBOT_RECORD_MIN_WPM) makes the robot happy.
 static void top_wpm_update(void) {
     uint8_t wpm = get_current_wpm();
@@ -686,6 +841,7 @@ typedef struct {
     uint8_t  history[HIST_N];
     uint16_t typed;
     uint16_t backspaces;
+    uint8_t  left_pct;
 } robot_sync_t;
 
 static bool         robot_sync_dirty;
@@ -697,6 +853,7 @@ static void robot_sync_handler(uint8_t in_len, const void *in_data, uint8_t out_
         for (uint8_t i = 0; i < HIST_N; i++) {
             key_history[i] = d->history[i];
         }
+        hand_left_pct  = d->left_pct;
         typed_keys     = d->typed;
         backspace_keys = d->backspaces;
         robot_keys     = d->keys;
@@ -716,12 +873,16 @@ void display_note_keypress(uint16_t keycode, uint8_t tap_count, bool right_hand)
     } else if (IS_BASIC_KEYCODE(keycode)) {
         kc = keycode;
     }
+    bool shifted = ((get_mods() | get_oneshot_mods() | get_weak_mods()) & MOD_MASK_SHIFT) != 0;
+    if (IS_QK_MODS(keycode) && (QK_MODS_GET_MODS(keycode) & MOD_LSFT)) {
+        shifted = true;
+    }
     char label[8];
     if (kc != KC_NO && key_label(kc, label)) {
         for (uint8_t i = HIST_N - 1; i > 0; i--) {
             key_history[i] = key_history[i - 1];
         }
-        key_history[0] = kc;
+        key_history[0] = kc | (shifted ? 0x80 : 0);
         typed_keys     = typed_keys + 1;
         if (kc == KC_BSPC) {
             backspace_keys = backspace_keys + 1;
@@ -731,6 +892,16 @@ void display_note_keypress(uint16_t keycode, uint8_t tap_count, bool right_hand)
             backspace_keys = backspace_keys / 2;
         }
     }
+    if (right_hand) {
+        hand_right_cnt++;
+    } else {
+        hand_left_cnt++;
+    }
+    if (hand_left_cnt + hand_right_cnt >= BALANCE_WINDOW_KEYS) { // rolling window: halve the counts
+        hand_left_cnt /= 2;
+        hand_right_cnt /= 2;
+    }
+    hand_left_pct    = (uint8_t)((hand_left_cnt * 100u) / (hand_left_cnt + hand_right_cnt));
     robot_last_hand  = right_hand ? 1 : 0;
     robot_keys       = robot_keys + 1;
     robot_sync_dirty = true;
@@ -745,7 +916,7 @@ void display_sync_task(void) {
     if ((int32_t)(timer_read32() - next_try) < 0) {
         return;
     }
-    robot_sync_t d = {.keys = robot_keys, .right_hand = robot_last_hand, .typed = typed_keys, .backspaces = backspace_keys};
+    robot_sync_t d = {.keys = robot_keys, .right_hand = robot_last_hand, .typed = typed_keys, .backspaces = backspace_keys, .left_pct = hand_left_pct};
     for (uint8_t i = 0; i < HIST_N; i++) {
         d.history[i] = key_history[i];
     }
@@ -805,9 +976,11 @@ __attribute__((weak)) bool display_init_user(void) {
 void display_ui_init(void) {
     if (is_keyboard_left()) {
         wpm_layer_display_init();
-        draw_os(true);
 #ifdef ROBOT_UI_ENABLE
+        draw_balance();
         draw_mods(true);
+#else
+        draw_os(true);
 #endif
     } else {
 #ifdef ROBOT_UI_ENABLE
@@ -901,6 +1074,7 @@ void display_task_kb(void) {
 
 #ifdef ROBOT_UI_ENABLE
     top_wpm_update();
+    idle_task();
 #endif
 
     if (splash_active) {
@@ -955,14 +1129,17 @@ void display_task_kb(void) {
 
 #ifdef ROBOT_UI_ENABLE
         draw_mods(false);
-#endif
-
+        if (hand_left_pct != balance_drawn) {
+            draw_balance();
+        }
+#else
         static os_variant_t last_os = OS_UNSURE;
 
         if (detected_host_os() != last_os) {
             draw_os(false);
             last_os = detected_host_os();
         }
+#endif
 
     } else {
 #ifdef ROBOT_UI_ENABLE
