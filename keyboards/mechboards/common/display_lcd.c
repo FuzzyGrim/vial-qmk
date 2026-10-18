@@ -19,7 +19,7 @@
 
 // ---------------------------------------------------------------------------
 // Robot UI (define ROBOT_UI_ENABLE in the keyboard config.h to turn it on).
-//   left screen : layer, WPM graph, modifier indicators, OS
+//   left screen : layer, uptime + backspace rate, WPM graph, modifier indicators, OS
 //   right screen: layer 0          -> typing robot with WPM and session TOP speed
 //                 layers 1, 2 ...  -> history of the last typed keys
 //                 ROBOT_RGB_LAYER  -> RGB / backlight info
@@ -64,7 +64,7 @@
 
 #define WPM_CHART_WIDTH 135
 #ifdef ROBOT_UI_ENABLE
-#    define WPM_CHART_HEIGHT 78 // tall chart: the WPM / TOP numbers now live on the right display
+#    define WPM_CHART_HEIGHT 60 // chart sits below the UPTIME / BKSP numbers (WPM / TOP live on the right display)
 #else
 #    define WPM_CHART_HEIGHT 70
 #endif
@@ -99,6 +99,10 @@ static uint32_t splash_start;
 static uint8_t       session_top_wpm;           // highest WPM since power-up (not saved)
 static volatile uint16_t robot_keys;            // key presses since power-up (master: counted, slave: synced)
 static volatile uint8_t  robot_last_hand;       // 0 = left half pressed last, 1 = right half
+static volatile uint16_t typed_keys;            // keys that could be shown in the history (master: counted, slave: synced)
+static volatile uint16_t backspace_keys;        // how many of those were Backspace
+static uint32_t      stats_uptime_drawn = 0xFFFFFFFF;
+static int8_t        stats_bsp_drawn = -2;
 static volatile uint8_t  key_history[HIST_N];   // newest first, HID keycodes, 0 = empty (master: recorded, slave: synced)
 typedef enum { SCREEN_ROBOT, SCREEN_HISTORY, SCREEN_RGB } right_screen_t;
 static right_screen_t right_screen = SCREEN_ROBOT; // what the right display is showing
@@ -246,9 +250,36 @@ void draw_os(bool init) {
 }
 
 #ifdef ROBOT_UI_ENABLE
-// Small caption above the WPM graph.
+// Backspace share of typed keys in percent, -1 until there are enough keys to be meaningful.
+static int8_t bsp_percent(void) {
+    if (typed_keys < 10) {
+        return -1;
+    }
+    return (int8_t)(((uint32_t)backspace_keys * 100) / typed_keys);
+}
+
+// Two columns under the layer row: UPTIME since power-up and BKSP (backspace rate).
 void draw_wpm_text(void) {
-    drawtext_centered_recolor(surface, 0, 74, LCD_WIDTH, pixellari_18, "WPM", 0, 0, 150, 0, 0, 0);
+    char     buffer[16] = {0};
+    uint32_t up         = timer_read32() / 1000;
+    int8_t   bp         = bsp_percent();
+    qp_rect(surface, 0, 72, LCD_WIDTH - 1, 72 + pixellari_18->line_height + pixellari_24->line_height, 0, 0, 0, true);
+    drawtext_centered_recolor(surface, 0, 72, 67, pixellari_18, "UPTIME", 0, 0, 150, 0, 0, 0);
+    drawtext_centered_recolor(surface, 68, 72, 67, pixellari_18, "BKSP", ui_hsv.h, ui_hsv.s, ui_hsv.v / 2, 0, 0, 0);
+    if (up >= 3600) {
+        snprintf(buffer, sizeof(buffer), "%luh%02lu", (unsigned long)(up / 3600), (unsigned long)((up / 60) % 60));
+    } else {
+        snprintf(buffer, sizeof(buffer), "%lu:%02lu", (unsigned long)(up / 60), (unsigned long)(up % 60));
+    }
+    drawtext_centered(surface, 0, 90, 67, pixellari_24, buffer);
+    if (bp < 0) {
+        snprintf(buffer, sizeof(buffer), "--");
+    } else {
+        snprintf(buffer, sizeof(buffer), "%d%%", bp);
+    }
+    drawtext_centered_recolor(surface, 68, 90, 67, pixellari_24, buffer, ui_hsv.h, ui_hsv.s, ui_hsv.v, 0, 0, 0);
+    stats_uptime_drawn = up;
+    stats_bsp_drawn    = bp;
 }
 
 // Shift / Ctrl / Alt / Gui: filled while held (left or right key, or one-shot).
@@ -595,6 +626,10 @@ static void history_task(void) {
 // Track the session top speed; a new record (above ROBOT_RECORD_MIN_WPM) makes the robot happy.
 static void top_wpm_update(void) {
     uint8_t wpm = get_current_wpm();
+    // The WPM window is still filling up in the first seconds after power-up and reads far too high then.
+    if (timer_read32() < (uint32_t)WPM_SAMPLE_SECONDS * 1000) {
+        return;
+    }
     if (wpm > session_top_wpm) {
         session_top_wpm = wpm;
         uint32_t now    = timer_read32();
@@ -612,6 +647,8 @@ typedef struct {
     uint16_t keys;
     uint8_t  right_hand;
     uint8_t  history[HIST_N];
+    uint16_t typed;
+    uint16_t backspaces;
 } robot_sync_t;
 
 static bool         robot_sync_dirty;
@@ -623,7 +660,9 @@ static void robot_sync_handler(uint8_t in_len, const void *in_data, uint8_t out_
         for (uint8_t i = 0; i < HIST_N; i++) {
             key_history[i] = d->history[i];
         }
-        robot_keys = d->keys;
+        typed_keys     = d->typed;
+        backspace_keys = d->backspaces;
+        robot_keys     = d->keys;
     }
 }
 
@@ -646,6 +685,14 @@ void display_note_keypress(uint16_t keycode, uint8_t tap_count, bool right_hand)
             key_history[i] = key_history[i - 1];
         }
         key_history[0] = kc;
+        typed_keys     = typed_keys + 1;
+        if (kc == KC_BSPC) {
+            backspace_keys = backspace_keys + 1;
+        }
+        if (typed_keys >= 60000) { // keep the ratio, avoid overflow
+            typed_keys     = typed_keys / 2;
+            backspace_keys = backspace_keys / 2;
+        }
     }
     robot_last_hand  = right_hand ? 1 : 0;
     robot_keys       = robot_keys + 1;
@@ -661,7 +708,7 @@ void display_sync_task(void) {
     if ((int32_t)(timer_read32() - next_try) < 0) {
         return;
     }
-    robot_sync_t d = {.keys = robot_keys, .right_hand = robot_last_hand};
+    robot_sync_t d = {.keys = robot_keys, .right_hand = robot_last_hand, .typed = typed_keys, .backspaces = backspace_keys};
     for (uint8_t i = 0; i < HIST_N; i++) {
         d.history[i] = key_history[i];
     }
@@ -852,6 +899,9 @@ void display_task_kb(void) {
             draw_lock_indicators();
 #else
             (void)lastwpm;
+            if (timer_read32() / 1000 != stats_uptime_drawn || bsp_percent() != stats_bsp_drawn) {
+                draw_wpm_text();
+            }
 #endif
             wpm_chart_write_value(currwpm);
             draw_wpm_chart_2(false);
