@@ -50,6 +50,21 @@
 #ifndef ROBOT_RECORD_COOLDOWN_MS
 #    define ROBOT_RECORD_COOLDOWN_MS 8000 // minimum time between two celebrations
 #endif
+#ifndef ROBOT_ULTRA_WPM
+#    define ROBOT_ULTRA_WPM 80 // at or above this WPM: ultra-fast turbo mode (glitching robot, pink pupils, 2 frames)
+#endif
+#ifndef ROBOT_ULTRA_FRAME_MS
+#    define ROBOT_ULTRA_FRAME_MS 90 // how long each of the two ultra frames is shown
+#endif
+#ifndef ROBOT_MEDIUM_WPM
+#    define ROBOT_MEDIUM_WPM 35 // from here to ROBOT_FAST_WPM the robot types in a steady medium-speed loop (2 frames)
+#endif
+#ifndef ROBOT_MED_FRAME_MS
+#    define ROBOT_MED_FRAME_MS 160 // how long each of the two medium-speed frames is shown
+#endif
+#ifndef ROBOT_HAPPY_FRAME_MS
+#    define ROBOT_HAPPY_FRAME_MS 250 // the happy robot alternates two frames (arms up / cheering)
+#endif
 #ifndef ROBOT_FAST_FRAME_MS
 #    define ROBOT_FAST_FRAME_MS 120 // how long each of the two fast-typing frames is shown
 #endif
@@ -553,9 +568,13 @@ static void robot_update_pose(void) {
     }
 
     if (now < robot_happy_until) {
-        robot_pose = ROBOT_POSE_HAPPY;
+        robot_pose = ((now / ROBOT_HAPPY_FRAME_MS) & 1) ? ROBOT_POSE_HAPPY_B : ROBOT_POSE_HAPPY_A;
+    } else if (wpm >= ROBOT_ULTRA_WPM && now - robot_last_key_time < 700) {
+        robot_pose = ((now / ROBOT_ULTRA_FRAME_MS) & 1) ? ROBOT_POSE_ULTRA_B : ROBOT_POSE_ULTRA_A;
     } else if (wpm >= ROBOT_FAST_WPM && now - robot_last_key_time < 700) {
         robot_pose = ((now / ROBOT_FAST_FRAME_MS) & 1) ? ROBOT_POSE_FAST_B : ROBOT_POSE_FAST_A; // hands take turns
+    } else if (wpm >= ROBOT_MEDIUM_WPM && now - robot_last_key_time < 700) {
+        robot_pose = ((now / ROBOT_MED_FRAME_MS) & 1) ? ROBOT_POSE_MED_B : ROBOT_POSE_MED_A; // steady typing loop
     } else if (now < robot_press_until) {
         robot_pose = robot_last_hand ? ROBOT_POSE_TYPE_R : ROBOT_POSE_TYPE_L;
     } else if (now - robot_last_key_time > ROBOT_SLEEP_MS) {
