@@ -58,8 +58,8 @@
 #endif
 #define ROBOT_SCALE 4
 #define ROBOT_X ((135 - ROBOT_W * ROBOT_SCALE) / 2)
-#define ROBOT_Y 40
-#define ROBOT_STATS_Y 172 // WPM / TOP labels; the numbers sit 18 px below
+#define ROBOT_Y 33
+#define ROBOT_STATS_Y 179 // WPM / TOP labels; the numbers sit 18 px below
 #define HIST_N 18         // keys remembered for the history screen (3 columns x 6 rows)
 
 #define WPM_CHART_WIDTH 135
@@ -89,6 +89,15 @@ painter_font_handle_t pixellari_24;
 
 static hsv_t ui_hsv = {129, 189, 181};
 static hsv_t last_hsv = {0, 0, 255};
+
+// ui_hsv is the accent colour of every screen. By default it follows the RGB hue / saturation;
+// define UI_ACCENT_H / UI_ACCENT_S / UI_ACCENT_V in config.h to pin it to a fixed colour instead.
+static void ui_update_color(void) {
+    ui_hsv = last_hsv;
+#ifdef UI_ACCENT_H
+    ui_hsv = (hsv_t){UI_ACCENT_H, UI_ACCENT_S, UI_ACCENT_V};
+#endif
+}
 
 static deferred_token display_task_token __attribute__((used));
 static bool splash_active;
@@ -182,6 +191,12 @@ void drawtext_centered(painter_device_t device, uint16_t x, uint16_t y, uint8_t 
 
 void drawtext_layer(uint16_t x, uint16_t y, uint8_t width, const char *str, uint8_t layer) {
     if (layer == get_highest_layer(layer_state)) {
+#ifdef ROBOT_UI_ENABLE
+        // Highlight two pixel rows higher than the text box: a thin cap above the active layer number.
+        uint16_t text_w = qp_textwidth(pixellari_24, str);
+        uint16_t left   = x + (width - text_w) / 2;
+        qp_rect(surface, left, y - 2, left + text_w - 1, y - 1, ui_hsv.h, ui_hsv.s, ui_hsv.v, true);
+#endif
         drawtext_centered_recolor(surface, x, y, width, pixellari_24, str, 255, 0, 255, ui_hsv.h, ui_hsv.s, ui_hsv.v);
     } else {
         drawtext_centered_recolor(surface, x, y, width, pixellari_24, str, 255, 0, 255, 0, 0, 0);
@@ -207,6 +222,9 @@ void draw_lock_indicators(void) {
 
 void draw_layers(void) {
     drawtext_centered(surface, 0, 10, 135, pixellari_24, "LAYER");
+#ifdef ROBOT_UI_ENABLE
+    qp_rect(surface, 0, 43, LCD_WIDTH - 1, 44, 0, 0, 0, true); // clear the previous highlight cap
+#endif
     drawtext_layer(0, 45, 32, "1", 0);
     drawtext_layer(34, 45, 32, "2", 1);
     drawtext_layer(66, 45, 32, "3", 2);
@@ -263,21 +281,21 @@ void draw_wpm_text(void) {
     char     buffer[16] = {0};
     uint32_t up         = timer_read32() / 1000;
     int8_t   bp         = bsp_percent();
-    qp_rect(surface, 0, 72, LCD_WIDTH - 1, 72 + pixellari_18->line_height + pixellari_24->line_height, 0, 0, 0, true);
-    drawtext_centered_recolor(surface, 0, 72, 67, pixellari_18, "UPTIME", 0, 0, 150, 0, 0, 0);
-    drawtext_centered_recolor(surface, 68, 72, 67, pixellari_18, "BKSP", ui_hsv.h, ui_hsv.s, ui_hsv.v / 2, 0, 0, 0);
+    qp_rect(surface, 0, 75, LCD_WIDTH - 1, 75 + pixellari_18->line_height + pixellari_24->line_height, 0, 0, 0, true);
+    drawtext_centered_recolor(surface, 0, 75, 67, pixellari_18, "UPTIME", 0, 0, 150, 0, 0, 0);
+    drawtext_centered_recolor(surface, 68, 75, 67, pixellari_18, "BKSP", ui_hsv.h, ui_hsv.s, ui_hsv.v / 2, 0, 0, 0);
     if (up >= 3600) {
         snprintf(buffer, sizeof(buffer), "%luh%02lu", (unsigned long)(up / 3600), (unsigned long)((up / 60) % 60));
     } else {
         snprintf(buffer, sizeof(buffer), "%lu:%02lu", (unsigned long)(up / 60), (unsigned long)(up % 60));
     }
-    drawtext_centered(surface, 0, 90, 67, pixellari_24, buffer);
+    drawtext_centered(surface, 0, 93, 67, pixellari_24, buffer);
     if (bp < 0) {
         snprintf(buffer, sizeof(buffer), "--");
     } else {
         snprintf(buffer, sizeof(buffer), "%d%%", bp);
     }
-    drawtext_centered_recolor(surface, 68, 90, 67, pixellari_24, buffer, ui_hsv.h, ui_hsv.s, ui_hsv.v, 0, 0, 0);
+    drawtext_centered_recolor(surface, 68, 93, 67, pixellari_24, buffer, ui_hsv.h, ui_hsv.s, ui_hsv.v, 0, 0, 0);
     stats_uptime_drawn = up;
     stats_bsp_drawn    = bp;
 }
@@ -834,7 +852,7 @@ void display_init_kb(void) {
     last_hsv.h = rgb_matrix_get_hue();
     last_hsv.s = rgb_matrix_get_sat();
 
-    ui_hsv = last_hsv;
+    ui_update_color();
 
     if (is_keyboard_master()) {
         splash_active = true;
@@ -877,7 +895,7 @@ void display_task_kb(void) {
     if (last_hsv.h != rgb_matrix_get_hue() || last_hsv.s != rgb_matrix_get_sat()) {
         last_hsv.h = rgb_matrix_get_hue();
         last_hsv.s = rgb_matrix_get_sat();
-        ui_hsv      = last_hsv;
+        ui_update_color();
         display_ui_init();
     }
 
