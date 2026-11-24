@@ -50,13 +50,13 @@
 #define SPLIT_ACTIVITY_ENABLE
 #define SPLIT_DETECTED_OS_ENABLE
 #define SPLIT_LED_STATE_ENABLE
-#define SPLIT_WPM_ENABLE  /* WPM is needed on both halves (TOP speed, robot) */
+#define SPLIT_WPM_ENABLE  /* WPM is needed on both halves (TOP speed, Luna) */
 /* Measure WPM over 10 s instead of QMK's default 5 s: less jumpy when you type in bursts. */
 #define WPM_SAMPLE_SECONDS 10
 #define WPM_SAMPLE_PERIODS 50
 #define SPLIT_MODS_ENABLE /* modifier indicators work whichever half is plugged in */
 
-/* Robot UI: typing robot on the right display, modifier indicators + TOP speed on the left. */
+/* Display UI: Luna the keyboard pet on the right display, modifier indicators + stats on the left. */
 #define ROBOT_UI_ENABLE
 #define SPLIT_TRANSACTION_IDS_KB KB_SYNC_ROBOT
 

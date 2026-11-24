@@ -12,15 +12,15 @@
 #include "lib/lib8tion/lib8tion.h"
 #include "rgb_matrix.h"
 #include "backlight/backlight.h"
-#include "robot_sprites.h"
+#include "luna_sprites.h"
 #ifdef ROBOT_UI_ENABLE
 #    include "transactions.h"
 #endif
 
 // ---------------------------------------------------------------------------
-// Robot UI (define ROBOT_UI_ENABLE in the keyboard config.h to turn it on).
+// Display UI with Luna the keyboard pet (define ROBOT_UI_ENABLE in the keyboard config.h to turn it on).
 //   left screen : layer, uptime + backspace rate, WPM graph, modifier indicators, OS
-//   right screen: layer 0          -> typing robot with WPM and session TOP speed
+//   right screen: layer 0          -> Luna the dog (sit / walk / run / sneak / bark / sleep) with WPM and session TOP speed
 //                 layers 1, 2 ...  -> history of the last typed keys
 //                 ROBOT_RGB_LAYER  -> RGB / backlight info
 // Needs SPLIT_WPM_ENABLE, SPLIT_MODS_ENABLE and SPLIT_TRANSACTION_IDS_KB = KB_SYNC_ROBOT.
@@ -29,65 +29,44 @@
 #ifndef ROBOT_RGB_LAYER
 #    define ROBOT_RGB_LAYER 3 // layer index that shows the RGB info screen on the right display
 #endif
-#ifndef ROBOT_FAST_WPM
-#    define ROBOT_FAST_WPM 60 // at or above this WPM the robot types with both hands + sparks (2 animated frames)
+#ifndef LUNA_RUN_WPM
+#    define LUNA_RUN_WPM 35 // typing at or above this WPM: Luna runs (below it she walks)
 #endif
-#ifndef ROBOT_SLEEP_MS
-#    define ROBOT_SLEEP_MS 30000 // no key press for this long -> robot falls asleep
+#ifndef LUNA_FAST_WPM
+#    define LUNA_FAST_WPM 60 // at or above this WPM she runs with faster frames
 #endif
-#ifndef ROBOT_PRESS_MS
-#    define ROBOT_PRESS_MS 140 // how long the "hand down" pose is held per key press
+#ifndef LUNA_SLEEP_MS
+#    define LUNA_SLEEP_MS 30000 // no key press for this long -> Luna falls asleep
 #endif
-#ifndef ROBOT_TICK_MS
-#    define ROBOT_TICK_MS 60 // right display refresh interval while the robot is shown
+#ifndef LUNA_TYPING_MS
+#    define LUNA_TYPING_MS 1000 // a key press this recent counts as "typing" (walk / run), otherwise she sits
 #endif
-#ifndef ROBOT_HAPPY_MS
-#    define ROBOT_HAPPY_MS 1800 // how long the robot celebrates a new top speed
+#ifndef LUNA_TICK_MS
+#    define LUNA_TICK_MS 60 // right display refresh interval while Luna is shown
 #endif
-#ifndef ROBOT_RECORD_MIN_WPM
-#    define ROBOT_RECORD_MIN_WPM 30 // top speeds below this do not count as a celebration
+#ifndef LUNA_OOPS_MS
+#    define LUNA_OOPS_MS 1000 // 3+ Backspaces in a row, no key for this long -> the barking ends
 #endif
-#ifndef ROBOT_RECORD_COOLDOWN_MS
-#    define ROBOT_RECORD_COOLDOWN_MS 8000 // minimum time between two celebrations
+#ifndef LUNA_SIT_FRAME_MS
+#    define LUNA_SIT_FRAME_MS 400 // how long each frame lasts, per state
 #endif
-#ifndef ROBOT_SLEEP_FRAME_MS
-#    define ROBOT_SLEEP_FRAME_MS 900 // the sleeping robot alternates "z" and "zZ"
+#ifndef LUNA_WALK_FRAME_MS
+#    define LUNA_WALK_FRAME_MS 200
 #endif
-#ifndef ROBOT_OOPS_MS
-#    define ROBOT_OOPS_MS 1000 // 3+ Backspaces in a row, no key for this long -> oops pose ends
+#ifndef LUNA_RUN_FRAME_MS
+#    define LUNA_RUN_FRAME_MS 150
 #endif
-#ifndef ROBOT_OOPS_FRAME_MS
-#    define ROBOT_OOPS_FRAME_MS 150
+#ifndef LUNA_FAST_FRAME_MS
+#    define LUNA_FAST_FRAME_MS 100
 #endif
-#ifndef ROBOT_SHORTCUT_FRAME_MS
-#    define ROBOT_SHORTCUT_FRAME_MS 250 // Ctrl / Alt / Gui held
+#ifndef LUNA_SNEAK_FRAME_MS
+#    define LUNA_SNEAK_FRAME_MS 250
 #endif
-#ifndef ROBOT_STARTLED_MS
-#    define ROBOT_STARTLED_MS 600 // jump when the first key hits a sleeping robot
+#ifndef LUNA_BARK_FRAME_MS
+#    define LUNA_BARK_FRAME_MS 150
 #endif
-#ifndef ROBOT_STARTLED_FRAME_MS
-#    define ROBOT_STARTLED_FRAME_MS 150
-#endif
-#ifndef ROBOT_MILESTONE_KEYS
-#    define ROBOT_MILESTONE_KEYS 1000 // confetti every this many key presses
-#endif
-#ifndef ROBOT_CONFETTI_MS
-#    define ROBOT_CONFETTI_MS 3000
-#endif
-#ifndef ROBOT_CONFETTI_FRAME_MS
-#    define ROBOT_CONFETTI_FRAME_MS 200
-#endif
-#ifndef ROBOT_ACTIVITY_FROM_MS
-#    define ROBOT_ACTIVITY_FROM_MS 10000 // idle this long -> coffee / reading (alternating)
-#endif
-#ifndef ROBOT_ACTIVITY_FRAME_MS
-#    define ROBOT_ACTIVITY_FRAME_MS 700
-#endif
-#ifndef ROBOT_YAWN_FROM_MS
-#    define ROBOT_YAWN_FROM_MS 25000 // idle this long -> yawn, then sleep at ROBOT_SLEEP_MS
-#endif
-#ifndef ROBOT_YAWN_FRAME_MS
-#    define ROBOT_YAWN_FRAME_MS 500
+#ifndef LUNA_SLEEP_FRAME_MS
+#    define LUNA_SLEEP_FRAME_MS 900 // the sleeping dog alternates "z" and "zZ"
 #endif
 #ifndef BALANCE_WINDOW_KEYS
 #    define BALANCE_WINDOW_KEYS 200 // hand balance covers roughly the last 100-200 key presses
@@ -98,31 +77,15 @@
 #ifndef IDLE_OFF_MS
 #    define IDLE_OFF_MS 300000 // no input for this long: screens and key lighting off
 #endif
-#ifndef ROBOT_ULTRA_WPM
-#    define ROBOT_ULTRA_WPM 80 // at or above this WPM: ultra-fast turbo mode (glitching robot, pink pupils, 2 frames)
-#endif
-#ifndef ROBOT_ULTRA_FRAME_MS
-#    define ROBOT_ULTRA_FRAME_MS 90 // how long each of the two ultra frames is shown
-#endif
-#ifndef ROBOT_MEDIUM_WPM
-#    define ROBOT_MEDIUM_WPM 35 // from here to ROBOT_FAST_WPM the robot types in a steady medium-speed loop (2 frames)
-#endif
-#ifndef ROBOT_MED_FRAME_MS
-#    define ROBOT_MED_FRAME_MS 160 // how long each of the two medium-speed frames is shown
-#endif
-#ifndef ROBOT_HAPPY_FRAME_MS
-#    define ROBOT_HAPPY_FRAME_MS 250 // the happy robot alternates two frames (arms up / cheering)
-#endif
-#ifndef ROBOT_FAST_FRAME_MS
-#    define ROBOT_FAST_FRAME_MS 120 // how long each of the two fast-typing frames is shown
-#endif
 #ifndef LEFT_GRAPH_MAX_WPM
 #    define LEFT_GRAPH_MAX_WPM 120 // WPM that fills the whole graph on the left display
 #endif
-#define ROBOT_SCALE 4
-#define ROBOT_X ((135 - ROBOT_W * ROBOT_SCALE) / 2)
-#define ROBOT_Y 33
-#define ROBOT_STATS_Y 179 // WPM / TOP labels; the numbers sit 18 px below
+#define LUNA_SCALE 4
+#define LUNA_X ((135 - LUNA_W * LUNA_SCALE) / 2)
+#define LUNA_AREA_Y 33  // top of the area Luna (and her z's) are drawn in
+#define LUNA_AREA_H 120 // Luna stands on the bottom edge of it
+#define LUNA_Y (LUNA_AREA_Y + LUNA_AREA_H - LUNA_H * LUNA_SCALE)
+#define STATS_Y 179 // WPM / TOP labels; the numbers sit 18 px below
 #define HIST_N 18         // keys remembered for the history screen (3 columns x 6 rows)
 
 #define WPM_CHART_WIDTH 135
@@ -167,27 +130,25 @@ static bool splash_active;
 static uint32_t splash_start;
 
 #ifdef ROBOT_UI_ENABLE
-// Robot UI state.
+// Luna state.
+// Poses 0 .. LUNA_FRAME_COUNT-1 are sprite frames; the two sleep poses reuse the sit sprites plus z / Z.
+enum { LUNA_POSE_SLEEP_A = LUNA_FRAME_COUNT, LUNA_POSE_SLEEP_B };
 static uint8_t       session_top_wpm;           // highest WPM since power-up (not saved)
 static volatile uint16_t robot_keys;            // key presses since power-up (master: counted, slave: synced)
-static volatile uint8_t  robot_last_hand;       // 0 = left half pressed last, 1 = right half
 static volatile uint16_t typed_keys;            // keys that could be shown in the history (master: counted, slave: synced)
 static volatile uint16_t backspace_keys;        // how many of those were Backspace
 static uint32_t      stats_uptime_drawn = 0xFFFFFFFF;
 static int8_t        stats_bsp_drawn = -2;
 static volatile uint8_t  key_history[HIST_N];   // newest first, HID keycodes, 0 = empty (master: recorded, slave: synced)
-typedef enum { SCREEN_ROBOT, SCREEN_HISTORY, SCREEN_RGB } right_screen_t;
-static right_screen_t right_screen = SCREEN_ROBOT; // what the right display is showing
-static uint8_t       robot_wpm_drawn = 0xFF;
-static uint8_t       robot_top_drawn = 0xFF;
+typedef enum { SCREEN_LUNA, SCREEN_HISTORY, SCREEN_RGB } right_screen_t;
+static right_screen_t right_screen = SCREEN_LUNA; // what the right display is showing
+static uint8_t       luna_wpm_drawn = 0xFF;
+static uint8_t       luna_top_drawn = 0xFF;
 static uint16_t      history_keys_drawn = 0xFFFF;
-static uint8_t       robot_pose = ROBOT_POSE_IDLE;
-static uint8_t       robot_pose_drawn = 0xFF;
-static uint16_t      robot_keys_seen;
-static bool          robot_first_update = true;
-static uint32_t      robot_startled_until;
-static uint32_t      robot_confetti_until;
-static uint8_t       robot_idle_activity;     // toggles on every key press: coffee / reading
+static uint8_t       luna_pose = LUNA_SIT1;
+static uint8_t       luna_pose_drawn = 0xFF;
+static uint16_t      luna_keys_seen;
+static bool          luna_first_update = true;
 static volatile uint8_t hand_left_pct = 50;   // share of left-hand key presses (rolling), master computes, slave synced
 static uint16_t      hand_left_cnt;
 static uint16_t      hand_right_cnt;
@@ -196,13 +157,7 @@ static uint8_t       idle_stage;               // 0 awake, 1 dimmed, 2 off
 static uint8_t       saved_bl_level;
 static uint8_t       saved_rgb_val;
 static bool          saved_rgb_on;
-static uint32_t      robot_last_key_time;
-static uint32_t      robot_press_until;
-static uint32_t      robot_happy_until;
-static uint32_t      robot_record_time;
-static bool          robot_record_valid;
-static uint32_t      robot_blink_until;
-static uint32_t      robot_next_blink;
+static uint32_t      luna_last_key_time;
 #endif
 
 
@@ -576,145 +531,146 @@ void rgb_bl_display_init(void) {
 
 #ifdef ROBOT_UI_ENABLE
 //----------------------------------------------------------
-// Right display: typing-reactive robot.
+// Right display, layer 0: Luna the dog, reacting to typing.
+// Sprites and the idea: HellSingCoder (see luna_sprites.h).
 
-// Palette index -> HSV. Index 1 follows the keyboard's RGB hue; white and pink stay fixed.
-static hsv_t robot_color(uint8_t idx) {
-    switch (idx) {
-        case 1:
-            return ui_hsv;
-        case 2:
-            return (hsv_t){ui_hsv.h, ui_hsv.s, (uint8_t)((uint16_t)ui_hsv.v * 32 / 100)};
-        case 3:
-            return (hsv_t){ui_hsv.h, ui_hsv.s, (uint8_t)((uint16_t)ui_hsv.v * 7 / 100)};
-        case 4:
-            return (hsv_t){0, 0, 255};
-        case 5:
-            return (hsv_t){234, 215, 255};
-        default:
-            return (hsv_t){ui_hsv.h, ui_hsv.s, (uint8_t)((uint16_t)ui_hsv.v * 55 / 100)};
+// z / Z shown above the sleeping dog. One byte per row, bit (w-1) is the leftmost pixel.
+static const uint8_t luna_z_small[4] = {0x7, 0x1, 0x2, 0x7};               // 3x4
+static const uint8_t luna_z_big[6]   = {0x1F, 0x01, 0x02, 0x04, 0x08, 0x1F}; // 5x6
+
+static void luna_draw_mask(const uint8_t *rows, uint8_t w, uint8_t h, uint16_t x, uint16_t y, uint8_t scale) {
+    for (uint8_t r = 0; r < h; r++) {
+        for (uint8_t c = 0; c < w; c++) {
+            if ((rows[r] >> (w - 1 - c)) & 1) {
+                qp_rect(surface, x + c * scale, y + r * scale, x + (c + 1) * scale - 1, y + (r + 1) * scale - 1, ui_hsv.h, ui_hsv.s, ui_hsv.v, true);
+            }
+        }
     }
 }
 
-static void robot_draw(uint8_t pose) {
-    qp_rect(surface, ROBOT_X, ROBOT_Y, ROBOT_X + ROBOT_W * ROBOT_SCALE - 1, ROBOT_Y + ROBOT_H * ROBOT_SCALE - 1, 0, 0, 0, true);
-    const uint8_t *frame = robot_frames[pose];
-    for (uint8_t y = 0; y < ROBOT_H; y++) {
-        uint8_t x = 0;
-        while (x < ROBOT_W) {
-            uint8_t idx = frame[y * ROBOT_W + x];
-            if (idx == 0) {
+// Draw one 1-bit sprite frame (OLED page layout) scaled up, in the accent colour.
+static void luna_draw_sprite(uint8_t frame) {
+    const uint8_t *data = luna_frames[frame];
+    for (uint8_t y = 0; y < LUNA_H; y++) {
+        const uint8_t page = y / 8;
+        const uint8_t bit  = y % 8;
+        uint8_t       x    = 0;
+        while (x < LUNA_W) {
+            if (!((pgm_read_byte(&data[page * LUNA_W + x]) >> bit) & 1)) {
                 x++;
                 continue;
             }
             uint8_t x_end = x;
-            while (x_end + 1 < ROBOT_W && frame[y * ROBOT_W + x_end + 1] == idx) {
+            while (x_end + 1 < LUNA_W && ((pgm_read_byte(&data[page * LUNA_W + x_end + 1]) >> bit) & 1)) {
                 x_end++;
             }
-            hsv_t c = robot_color(idx);
-            qp_rect(surface, ROBOT_X + x * ROBOT_SCALE, ROBOT_Y + y * ROBOT_SCALE, ROBOT_X + (x_end + 1) * ROBOT_SCALE - 1, ROBOT_Y + (y + 1) * ROBOT_SCALE - 1, c.h, c.s, c.v, true);
+            qp_rect(surface, LUNA_X + x * LUNA_SCALE, LUNA_Y + y * LUNA_SCALE, LUNA_X + (x_end + 1) * LUNA_SCALE - 1, LUNA_Y + (y + 1) * LUNA_SCALE - 1, ui_hsv.h, ui_hsv.s, ui_hsv.v, true);
             x = x_end + 1;
         }
     }
-    robot_pose_drawn = pose;
 }
 
-// WPM and TOP numbers under the robot (redrawn only when a value changes).
-static void robot_draw_stats(void) {
+static void luna_draw(uint8_t pose) {
+    qp_rect(surface, 0, LUNA_AREA_Y, LCD_WIDTH - 1, LUNA_AREA_Y + LUNA_AREA_H - 1, 0, 0, 0, true);
+    if (pose == LUNA_POSE_SLEEP_A) { // sitting, eyes shut, one small z
+        luna_draw_sprite(LUNA_SIT1);
+        luna_draw_mask(luna_z_small, 3, 4, 106, 52, 3);
+    } else if (pose == LUNA_POSE_SLEEP_B) { // tail twitches, z grows into zZ
+        luna_draw_sprite(LUNA_SIT2);
+        luna_draw_mask(luna_z_small, 3, 4, 102, 54, 3);
+        luna_draw_mask(luna_z_big, 5, 6, 112, 35, 3);
+    } else {
+        luna_draw_sprite(pose);
+    }
+    luna_pose_drawn = pose;
+}
+
+// WPM and TOP numbers under the dog (redrawn only when a value changes).
+static void luna_draw_stats(void) {
     char buffer[16] = {0};
-    qp_rect(surface, 0, ROBOT_STATS_Y, LCD_WIDTH - 1, ROBOT_STATS_Y + pixellari_18->line_height + pixellari_24->line_height, 0, 0, 0, true);
-    drawtext_centered_recolor(surface, 0, ROBOT_STATS_Y, 67, pixellari_18, "WPM", 0, 0, 150, 0, 0, 0);
-    drawtext_centered_recolor(surface, 68, ROBOT_STATS_Y, 67, pixellari_18, "TOP", ui_hsv.h, ui_hsv.s, ui_hsv.v / 2, 0, 0, 0);
+    qp_rect(surface, 0, STATS_Y, LCD_WIDTH - 1, STATS_Y + pixellari_18->line_height + pixellari_24->line_height, 0, 0, 0, true);
+    drawtext_centered_recolor(surface, 0, STATS_Y, 67, pixellari_18, "WPM", 0, 0, 150, 0, 0, 0);
+    drawtext_centered_recolor(surface, 68, STATS_Y, 67, pixellari_18, "TOP", ui_hsv.h, ui_hsv.s, ui_hsv.v / 2, 0, 0, 0);
     uint8_t wpm = get_current_wpm();
     snprintf(buffer, sizeof(buffer), "%d", wpm);
-    drawtext_centered(surface, 0, ROBOT_STATS_Y + 18, 67, pixellari_24, buffer);
+    drawtext_centered(surface, 0, STATS_Y + 18, 67, pixellari_24, buffer);
     snprintf(buffer, sizeof(buffer), "%d", session_top_wpm);
-    drawtext_centered_recolor(surface, 68, ROBOT_STATS_Y + 18, 67, pixellari_24, buffer, ui_hsv.h, ui_hsv.s, ui_hsv.v, 0, 0, 0);
-    robot_wpm_drawn = wpm;
-    robot_top_drawn = session_top_wpm;
+    drawtext_centered_recolor(surface, 68, STATS_Y + 18, 67, pixellari_24, buffer, ui_hsv.h, ui_hsv.s, ui_hsv.v, 0, 0, 0);
+    luna_wpm_drawn = wpm;
+    luna_top_drawn = session_top_wpm;
 }
 
-// Decide which pose the robot should be in right now.
-static void robot_update_pose(void) {
+// Decide which pose Luna should be in right now.
+//   bark   : 3+ Backspaces in a row, or Shift held
+//   sneak  : Ctrl / Alt / Gui held (shortcut)
+//   run    : typing at LUNA_RUN_WPM or more (faster frames from LUNA_FAST_WPM)
+//   walk   : typing slower than that
+//   sleep  : no key for LUNA_SLEEP_MS
+//   sit    : otherwise
+static void luna_update_pose(void) {
     uint32_t now = timer_read32();
     uint8_t  wpm = get_current_wpm();
 
     uint16_t keys = robot_keys;
-    if (robot_first_update) { // start awake, and do not celebrate keys counted before this half was ready
-        robot_first_update  = false;
-        robot_keys_seen     = keys;
-        robot_last_key_time = now;
+    if (luna_first_update) { // start awake
+        luna_first_update  = false;
+        luna_keys_seen     = keys;
+        luna_last_key_time = now;
     }
-    if (keys != robot_keys_seen) {
-        if (robot_pose == ROBOT_POSE_SLEEP_A || robot_pose == ROBOT_POSE_SLEEP_B) {
-            robot_startled_until = now + ROBOT_STARTLED_MS; // woken up by a key
-        }
-        if (keys / ROBOT_MILESTONE_KEYS > robot_keys_seen / ROBOT_MILESTONE_KEYS) {
-            robot_confetti_until = now + ROBOT_CONFETTI_MS;
-        }
-        robot_keys_seen     = keys;
-        robot_last_key_time = now;
-        robot_press_until   = now + ROBOT_PRESS_MS;
-        robot_idle_activity ^= 1;
+    if (keys != luna_keys_seen) {
+        luna_keys_seen     = keys;
+        luna_last_key_time = now;
     }
 
-    uint32_t idle   = now - robot_last_key_time;
-    bool     oops   = (key_history[0] & 0x7F) == KC_BSPC && (key_history[1] & 0x7F) == KC_BSPC && (key_history[2] & 0x7F) == KC_BSPC && idle < ROBOT_OOPS_MS;
-    bool     combo  = ((get_mods() | get_oneshot_mods()) & (MOD_MASK_CTRL | MOD_MASK_ALT | MOD_MASK_GUI)) != 0;
-    bool     typing = idle < 700;
+    uint32_t idle   = now - luna_last_key_time;
+    uint8_t  mods   = get_mods() | get_oneshot_mods();
+    bool     oops   = (key_history[0] & 0x7F) == KC_BSPC && (key_history[1] & 0x7F) == KC_BSPC && (key_history[2] & 0x7F) == KC_BSPC && idle < LUNA_OOPS_MS;
+    bool     sneak  = (mods & (MOD_MASK_CTRL | MOD_MASK_ALT | MOD_MASK_GUI)) != 0;
+    bool     shift  = (mods & MOD_MASK_SHIFT) != 0;
+    bool     typing = idle < LUNA_TYPING_MS;
+    uint8_t  step;
 
-    if (now < robot_confetti_until) {
-        robot_pose = ((now / ROBOT_CONFETTI_FRAME_MS) & 1) ? ROBOT_POSE_CONFETTI_B : ROBOT_POSE_CONFETTI_A;
-    } else if (now < robot_happy_until) {
-        robot_pose = ((now / ROBOT_HAPPY_FRAME_MS) & 1) ? ROBOT_POSE_HAPPY_B : ROBOT_POSE_HAPPY_A;
-    } else if (now < robot_startled_until) {
-        robot_pose = ((now / ROBOT_STARTLED_FRAME_MS) & 1) ? ROBOT_POSE_STARTLED_B : ROBOT_POSE_STARTLED_A;
-    } else if (oops) {
-        robot_pose = ((now / ROBOT_OOPS_FRAME_MS) & 1) ? ROBOT_POSE_OOPS_B : ROBOT_POSE_OOPS_A;
-    } else if (combo) {
-        robot_pose = ((now / ROBOT_SHORTCUT_FRAME_MS) & 1) ? ROBOT_POSE_SHORTCUT_B : ROBOT_POSE_SHORTCUT_A;
-    } else if (wpm >= ROBOT_ULTRA_WPM && typing) {
-        robot_pose = ((now / ROBOT_ULTRA_FRAME_MS) & 1) ? ROBOT_POSE_ULTRA_B : ROBOT_POSE_ULTRA_A;
-    } else if (wpm >= ROBOT_FAST_WPM && typing) {
-        robot_pose = ((now / ROBOT_FAST_FRAME_MS) & 1) ? ROBOT_POSE_FAST_B : ROBOT_POSE_FAST_A; // hands take turns
-    } else if (wpm >= ROBOT_MEDIUM_WPM && typing) {
-        robot_pose = ((now / ROBOT_MED_FRAME_MS) & 1) ? ROBOT_POSE_MED_B : ROBOT_POSE_MED_A; // steady typing loop
-    } else if (now < robot_press_until) {
-        robot_pose = robot_last_hand ? ROBOT_POSE_TYPE_R : ROBOT_POSE_TYPE_L;
-    } else if (idle > ROBOT_SLEEP_MS) {
-        robot_pose = ((now / ROBOT_SLEEP_FRAME_MS) & 1) ? ROBOT_POSE_SLEEP_B : ROBOT_POSE_SLEEP_A; // z / zZ
-    } else if (idle >= ROBOT_YAWN_FROM_MS) {
-        robot_pose = ((now / ROBOT_YAWN_FRAME_MS) & 1) ? ROBOT_POSE_YAWN_B : ROBOT_POSE_YAWN_A;
-    } else if (idle >= ROBOT_ACTIVITY_FROM_MS) {
-        bool second = ((now / ROBOT_ACTIVITY_FRAME_MS) & 1) != 0;
-        if (robot_idle_activity) {
-            robot_pose = second ? ROBOT_POSE_COFFEE_B : ROBOT_POSE_COFFEE_A;
-        } else {
-            robot_pose = second ? ROBOT_POSE_READ_B : ROBOT_POSE_READ_A;
-        }
+    if (oops) {
+        step = (now / LUNA_BARK_FRAME_MS) & 1;
+        luna_pose = LUNA_BARK1 + step;
+    } else if (sneak) {
+        step = (now / LUNA_SNEAK_FRAME_MS) & 1;
+        luna_pose = LUNA_SNEAK1 + step;
+    } else if (shift) {
+        step = (now / LUNA_BARK_FRAME_MS) & 1;
+        luna_pose = LUNA_BARK1 + step;
+    } else if (typing && wpm >= LUNA_FAST_WPM) {
+        step = (now / LUNA_FAST_FRAME_MS) & 1;
+        luna_pose = LUNA_RUN1 + step;
+    } else if (typing && wpm >= LUNA_RUN_WPM) {
+        step = (now / LUNA_RUN_FRAME_MS) & 1;
+        luna_pose = LUNA_RUN1 + step;
+    } else if (typing) {
+        step = (now / LUNA_WALK_FRAME_MS) & 1;
+        luna_pose = LUNA_WALK1 + step;
+    } else if (idle > LUNA_SLEEP_MS) {
+        step = (now / LUNA_SLEEP_FRAME_MS) & 1;
+        luna_pose = LUNA_POSE_SLEEP_A + step;
     } else {
-        if (now >= robot_next_blink) {
-            robot_blink_until = now + 150;
-            robot_next_blink  = now + 2500 + (now * 2654435761u >> 20) % 3000; // 2.5 - 5.5 s
-        }
-        robot_pose = now < robot_blink_until ? ROBOT_POSE_BLINK : ROBOT_POSE_IDLE;
+        step = (now / LUNA_SIT_FRAME_MS) & 1;
+        luna_pose = LUNA_SIT1 + step;
     }
 }
 
-static void robot_screen_init(void) {
+static void luna_screen_init(void) {
     clear_display();
-    robot_update_pose();
-    robot_draw(robot_pose);
-    robot_draw_stats();
+    luna_update_pose();
+    luna_draw(luna_pose);
+    luna_draw_stats();
 }
 
-static void robot_task(void) {
-    robot_update_pose();
-    if (robot_pose != robot_pose_drawn) {
-        robot_draw(robot_pose);
+static void luna_task(void) {
+    luna_update_pose();
+    if (luna_pose != luna_pose_drawn) {
+        luna_draw(luna_pose);
     }
-    if (get_current_wpm() != robot_wpm_drawn || session_top_wpm != robot_top_drawn) {
-        robot_draw_stats();
+    if (get_current_wpm() != luna_wpm_drawn || session_top_wpm != luna_top_drawn) {
+        luna_draw_stats();
     }
 }
 
@@ -815,7 +771,7 @@ static void idle_task(void) {
     idle_stage = want;
 }
 
-// Track the session top speed; a new record (above ROBOT_RECORD_MIN_WPM) makes the robot happy.
+// Track the session top speed (shown as TOP on the right display).
 static void top_wpm_update(void) {
     uint8_t wpm = get_current_wpm();
     // The WPM window is still filling up in the first seconds after power-up and reads far too high then.
@@ -824,20 +780,13 @@ static void top_wpm_update(void) {
     }
     if (wpm > session_top_wpm) {
         session_top_wpm = wpm;
-        uint32_t now    = timer_read32();
-        if (wpm >= ROBOT_RECORD_MIN_WPM && (!robot_record_valid || timer_elapsed32(robot_record_time) > ROBOT_RECORD_COOLDOWN_MS)) {
-            robot_record_valid = true;
-            robot_record_time  = now;
-            robot_happy_until  = now + ROBOT_HAPPY_MS;
-        }
     }
 }
 
 //----------------------------------------------------------
-// Key press info for the robot: counted on the master half, sent to the other half.
+// Key press info for the right display: counted on the master half, sent to the other half.
 typedef struct {
     uint16_t keys;
-    uint8_t  right_hand;
     uint8_t  history[HIST_N];
     uint16_t typed;
     uint16_t backspaces;
@@ -849,7 +798,6 @@ static bool         robot_sync_dirty;
 static void robot_sync_handler(uint8_t in_len, const void *in_data, uint8_t out_len, void *out_data) {
     if (in_len == sizeof(robot_sync_t)) {
         const robot_sync_t *d = (const robot_sync_t *)in_data;
-        robot_last_hand       = d->right_hand;
         for (uint8_t i = 0; i < HIST_N; i++) {
             key_history[i] = d->history[i];
         }
@@ -902,7 +850,6 @@ void display_note_keypress(uint16_t keycode, uint8_t tap_count, bool right_hand)
         hand_right_cnt /= 2;
     }
     hand_left_pct    = (uint8_t)((hand_left_cnt * 100u) / (hand_left_cnt + hand_right_cnt));
-    robot_last_hand  = right_hand ? 1 : 0;
     robot_keys       = robot_keys + 1;
     robot_sync_dirty = true;
 }
@@ -916,7 +863,7 @@ void display_sync_task(void) {
     if ((int32_t)(timer_read32() - next_try) < 0) {
         return;
     }
-    robot_sync_t d = {.keys = robot_keys, .right_hand = robot_last_hand, .typed = typed_keys, .backspaces = backspace_keys, .left_pct = hand_left_pct};
+    robot_sync_t d = {.keys = robot_keys, .typed = typed_keys, .backspaces = backspace_keys, .left_pct = hand_left_pct};
     for (uint8_t i = 0; i < HIST_N; i++) {
         d.history[i] = key_history[i];
     }
@@ -939,7 +886,7 @@ static right_screen_t right_screen_for_layer(void) {
     if (layer == ROBOT_RGB_LAYER) {
         return SCREEN_RGB;
     }
-    return layer == 0 ? SCREEN_ROBOT : SCREEN_HISTORY;
+    return layer == 0 ? SCREEN_LUNA : SCREEN_HISTORY;
 }
 #endif
 
@@ -947,7 +894,7 @@ static right_screen_t right_screen_for_layer(void) {
 static uint32_t next_interval(void) {
 #ifdef ROBOT_UI_ENABLE
     if (!is_keyboard_left() && right_screen != SCREEN_RGB) {
-        return ROBOT_TICK_MS;
+        return LUNA_TICK_MS;
     }
 #endif
     return 100;
@@ -990,7 +937,7 @@ void display_ui_init(void) {
         } else if (right_screen == SCREEN_HISTORY) {
             history_screen_init();
         } else {
-            robot_screen_init();
+            luna_screen_init();
         }
 #else
         rgb_bl_display_init();
@@ -1144,11 +1091,11 @@ void display_task_kb(void) {
     } else {
 #ifdef ROBOT_UI_ENABLE
         if (right_screen_for_layer() != right_screen) {
-            display_ui_init(); // switch between robot / key history / RGB info
+            display_ui_init(); // switch between Luna / key history / RGB info
         }
         if (right_screen != SCREEN_RGB) {
-            if (right_screen == SCREEN_ROBOT) {
-                robot_task();
+            if (right_screen == SCREEN_LUNA) {
+                luna_task();
             } else {
                 history_task();
             }
