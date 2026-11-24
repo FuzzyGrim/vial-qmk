@@ -88,8 +88,8 @@
 #endif
 #define LUNA_SCALE 4
 #define LUNA_X ((135 - LUNA_W * LUNA_SCALE) / 2)
-#define LUNA_AREA_Y 33  // top of the area Luna (and her z's) are drawn in
-#define LUNA_AREA_H 120 // Luna stands on the bottom edge of it
+#define LUNA_AREA_Y 8    // top of the area Luna (and the "!" / "?" above her) are drawn in
+#define LUNA_AREA_H 145 // Luna stands on the bottom edge of it
 #define LUNA_Y (LUNA_AREA_Y + LUNA_AREA_H - LUNA_H * LUNA_SCALE)
 #define STATS_Y 179 // WPM / TOP labels; the numbers sit 18 px below
 #define HIST_N 18         // keys remembered for the history screen (3 columns x 6 rows)
@@ -556,26 +556,53 @@ void rgb_bl_display_init(void) {
 // Sprites and the idea: HellSingCoder (see luna_sprites.h).
 
 // Animated poses: which sprite frame, how many screen pixels it is lifted off the ground, mirrored or not.
+// A "?" or "!" can float above her head.
 typedef struct {
     uint8_t frame;
     uint8_t lift_px;
     bool    flip;
+    char    mark; // 0, '?' or '!'
 } luna_look_t;
 
 static const luna_look_t luna_looks[] = {
     // oops: sits and looks left, right, left, right
-    {LUNA_SIT1, 0, false},
-    {LUNA_SIT1, 0, true},
-    {LUNA_SIT2, 0, false},
-    {LUNA_SIT2, 0, true},
+    {LUNA_SIT1, 0, false, '?'},
+    {LUNA_SIT1, 0, true, '?'},
+    {LUNA_SIT2, 0, false, '?'},
+    {LUNA_SIT2, 0, true, '?'},
     // startled: crouch, jump up, peak, come down, sit
-    {LUNA_SNEAK1, 0, false},
-    {LUNA_RUN1, 16, false},
-    {LUNA_RUN2, 32, false},
-    {LUNA_RUN1, 16, false},
-    {LUNA_SIT1, 0, false},
-    {LUNA_SIT2, 0, false},
+    {LUNA_SNEAK1, 0, false, '!'},
+    {LUNA_RUN1, 16, false, '!'},
+    {LUNA_RUN2, 32, false, '!'},
+    {LUNA_RUN1, 16, false, '!'},
+    {LUNA_SIT1, 0, false, '!'},
+    {LUNA_SIT2, 0, false, '!'},
 };
+
+// "?" (4x7) and "!" (2x7), one byte per row, bit (w-1) is the leftmost pixel.
+static const uint8_t luna_mark_q[7] = {0x6, 0x9, 0x1, 0x2, 0x4, 0x0, 0x4};
+static const uint8_t luna_mark_e[7] = {0x3, 0x3, 0x3, 0x3, 0x3, 0x0, 0x3};
+#define LUNA_MARK_SCALE 3
+#define LUNA_HEAD_X 112 // left edge of a mark above the head when she faces right (the head is on the right)
+#define LUNA_HEAD_TOP 4 // the head's top is about this many screen pixels below the top of the sprite
+
+static void luna_draw_mark(char mark, uint8_t lift_px, bool flip) {
+    const uint8_t *rows = mark == '?' ? luna_mark_q : luna_mark_e;
+    const uint8_t  w    = mark == '?' ? 4 : 2;
+    const uint8_t  h    = 7;
+    uint16_t       x    = LUNA_HEAD_X;
+    if (flip) { // she looks the other way: the head is on the left
+        x = 2 * LUNA_X + LUNA_W * LUNA_SCALE - x - w * LUNA_MARK_SCALE;
+    }
+    const uint16_t y = LUNA_Y - lift_px + LUNA_HEAD_TOP - 8 - h * LUNA_MARK_SCALE;
+    for (uint8_t r = 0; r < h; r++) {
+        for (uint8_t c = 0; c < w; c++) {
+            if ((rows[r] >> (w - 1 - c)) & 1) {
+                qp_rect(surface, x + c * LUNA_MARK_SCALE, y + r * LUNA_MARK_SCALE, x + (c + 1) * LUNA_MARK_SCALE - 1, y + (r + 1) * LUNA_MARK_SCALE - 1, ui_hsv.h, ui_hsv.s, ui_hsv.v, true);
+            }
+        }
+    }
+}
 
 // Draw one 1-bit sprite frame (OLED page layout) scaled up, in the accent colour.
 static void luna_draw_sprite(uint8_t frame, uint8_t lift_px, bool flip) {
@@ -609,6 +636,9 @@ static void luna_draw(uint8_t pose) {
     } else {
         const luna_look_t *look = &luna_looks[pose - LUNA_FRAME_COUNT];
         luna_draw_sprite(look->frame, look->lift_px, look->flip);
+        if (look->mark) {
+            luna_draw_mark(look->mark, look->lift_px, look->flip);
+        }
     }
     luna_pose_drawn = pose;
 }
