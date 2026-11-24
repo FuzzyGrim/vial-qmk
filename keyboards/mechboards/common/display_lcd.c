@@ -150,6 +150,8 @@ enum {
     LUNA_POSE_STARTLED_3,
     LUNA_POSE_STARTLED_4,
     LUNA_POSE_STARTLED_5,
+    LUNA_POSE_SLEEP_0, // asleep, breathing: "z", then "zZ"
+    LUNA_POSE_SLEEP_1,
 };
 #define LUNA_STARTLED_FRAMES 6
 #define LUNA_STARTLED_MS (LUNA_STARTLED_FRAMES * LUNA_STARTLED_FRAME_MS)
@@ -561,7 +563,7 @@ typedef struct {
     uint8_t frame;
     uint8_t lift_px;
     bool    flip;
-    char    mark; // 0, '?' or '!'
+    char    mark; // 0, '?', '!', 'z' (one small z) or 'Z' (z plus a bigger Z)
 } luna_look_t;
 
 static const luna_look_t luna_looks[] = {
@@ -577,24 +579,21 @@ static const luna_look_t luna_looks[] = {
     {LUNA_RUN1, 16, false, '!'},
     {LUNA_SIT1, 0, false, '!'},
     {LUNA_SIT2, 0, false, '!'},
+    // asleep: lying down, breathing
+    {LUNA_SLEEP1, 0, false, 'z'},
+    {LUNA_SLEEP2, 0, false, 'Z'},
 };
 
-// "?" (4x7) and "!" (2x7), one byte per row, bit (w-1) is the leftmost pixel.
-static const uint8_t luna_mark_q[7] = {0x6, 0x9, 0x1, 0x2, 0x4, 0x0, 0x4};
-static const uint8_t luna_mark_e[7] = {0x3, 0x3, 0x3, 0x3, 0x3, 0x0, 0x3};
+// Marks, one byte per row, bit (w-1) is the leftmost pixel.
+static const uint8_t luna_mark_q[7]  = {0x6, 0x9, 0x1, 0x2, 0x4, 0x0, 0x4};    // "?" 4x7
+static const uint8_t luna_mark_e[7]  = {0x3, 0x3, 0x3, 0x3, 0x3, 0x0, 0x3};    // "!" 2x7
+static const uint8_t luna_mark_z[4]  = {0x7, 0x1, 0x2, 0x7};                  // "z" 3x4
+static const uint8_t luna_mark_zz[6] = {0x1F, 0x01, 0x02, 0x04, 0x08, 0x1F}; // "Z" 5x6
 #define LUNA_MARK_SCALE 3
-#define LUNA_HEAD_X 112 // left edge of a mark above the head when she faces right (the head is on the right)
+#define LUNA_HEAD_X 112 // left edge of a "?" / "!" above the head when she faces right (the head is on the right)
 #define LUNA_HEAD_TOP 4 // the head's top is about this many screen pixels below the top of the sprite
 
-static void luna_draw_mark(char mark, uint8_t lift_px, bool flip) {
-    const uint8_t *rows = mark == '?' ? luna_mark_q : luna_mark_e;
-    const uint8_t  w    = mark == '?' ? 4 : 2;
-    const uint8_t  h    = 7;
-    uint16_t       x    = LUNA_HEAD_X;
-    if (flip) { // she looks the other way: the head is on the left
-        x = 2 * LUNA_X + LUNA_W * LUNA_SCALE - x - w * LUNA_MARK_SCALE;
-    }
-    const uint16_t y = LUNA_Y - lift_px + LUNA_HEAD_TOP - 8 - h * LUNA_MARK_SCALE;
+static void luna_draw_glyph(const uint8_t *rows, uint8_t w, uint8_t h, uint16_t x, uint16_t y) {
     for (uint8_t r = 0; r < h; r++) {
         for (uint8_t c = 0; c < w; c++) {
             if ((rows[r] >> (w - 1 - c)) & 1) {
@@ -602,6 +601,26 @@ static void luna_draw_mark(char mark, uint8_t lift_px, bool flip) {
             }
         }
     }
+}
+
+static void luna_draw_mark(char mark, uint8_t lift_px, bool flip) {
+    if (mark == 'z') { // above the head of the lying dog
+        luna_draw_glyph(luna_mark_z, 3, 4, 108, 88);
+        return;
+    }
+    if (mark == 'Z') { // the z drifts up and a bigger Z appears
+        luna_draw_glyph(luna_mark_z, 3, 4, 104, 90);
+        luna_draw_glyph(luna_mark_zz, 5, 6, 114, 64);
+        return;
+    }
+    const uint8_t *rows = mark == '?' ? luna_mark_q : luna_mark_e;
+    const uint8_t  w    = mark == '?' ? 4 : 2;
+    const uint8_t  h    = 7;
+    uint16_t       x    = LUNA_HEAD_X;
+    if (flip) { // she looks the other way: the head is on the left
+        x = 2 * LUNA_X + LUNA_W * LUNA_SCALE - x - w * LUNA_MARK_SCALE;
+    }
+    luna_draw_glyph(rows, w, h, x, LUNA_Y - lift_px + LUNA_HEAD_TOP - 8 - h * LUNA_MARK_SCALE);
 }
 
 // Draw one 1-bit sprite frame (OLED page layout) scaled up, in the accent colour.
@@ -678,7 +697,7 @@ static void luna_update_pose(void) {
         luna_last_key_time = now;
     }
     if (keys != luna_keys_seen) {
-        if (luna_pose == LUNA_SLEEP1 || luna_pose == LUNA_SLEEP2) {
+        if (luna_pose == LUNA_POSE_SLEEP_0 || luna_pose == LUNA_POSE_SLEEP_1) {
             luna_startled_until = now + LUNA_STARTLED_MS; // woken up by a key
         }
         luna_keys_seen     = keys;
@@ -716,7 +735,7 @@ static void luna_update_pose(void) {
         luna_pose = LUNA_WALK1 + step;
     } else if (idle > LUNA_SLEEP_MS) {
         step = (now / LUNA_SLEEP_FRAME_MS) & 1;
-        luna_pose = LUNA_SLEEP1 + step;
+        luna_pose = LUNA_POSE_SLEEP_0 + step;
     } else {
         step = (now / LUNA_SIT_FRAME_MS) & 1;
         luna_pose = LUNA_SIT1 + step;
