@@ -48,13 +48,10 @@
 #    define LUNA_OOPS_MS 1000 // 3+ Backspaces in a row, no key for this long -> the oops pose ends
 #endif
 #ifndef LUNA_OOPS_FRAME_MS
-#    define LUNA_OOPS_FRAME_MS 250 // the sweat drop falls every this many ms
-#endif
-#ifndef LUNA_STARTLED_MS
-#    define LUNA_STARTLED_MS 600 // how long Luna hops when the first key wakes her up
+#    define LUNA_OOPS_FRAME_MS 300 // she turns her head to the other side every this many ms
 #endif
 #ifndef LUNA_STARTLED_FRAME_MS
-#    define LUNA_STARTLED_FRAME_MS 150
+#    define LUNA_STARTLED_FRAME_MS 100 // frame time of the hop when a key wakes her up (6 frames)
 #endif
 #ifndef LUNA_SIT_FRAME_MS
 #    define LUNA_SIT_FRAME_MS 400 // how long each frame lasts, per state
@@ -75,7 +72,7 @@
 #    define LUNA_BARK_FRAME_MS 150
 #endif
 #ifndef LUNA_SLEEP_FRAME_MS
-#    define LUNA_SLEEP_FRAME_MS 900 // the sleeping dog alternates "z" and "zZ"
+#    define LUNA_SLEEP_FRAME_MS 900 // the sleeping dog breathes in / out
 #endif
 #ifndef BALANCE_WINDOW_KEYS
 #    define BALANCE_WINDOW_KEYS 200 // hand balance covers roughly the last 100-200 key presses
@@ -140,16 +137,22 @@ static uint32_t splash_start;
 
 #ifdef ROBOT_UI_ENABLE
 // Luna state.
-// Poses 0 .. LUNA_FRAME_COUNT-1 are sprite frames; the others reuse the sit sprites plus a drawn extra
-// (z / Z, sweat drop, "!") and, for startled, a hop.
+// A pose is either a sprite frame (0 .. LUNA_FRAME_COUNT-1) or one of the animated poses below, which
+// are existing frames lifted off the ground and / or mirrored (see luna_looks[]).
 enum {
-    LUNA_POSE_SLEEP_A = LUNA_FRAME_COUNT,
-    LUNA_POSE_SLEEP_B,
-    LUNA_POSE_OOPS_A,
-    LUNA_POSE_OOPS_B,
-    LUNA_POSE_STARTLED_A,
-    LUNA_POSE_STARTLED_B,
+    LUNA_POSE_OOPS_0 = LUNA_FRAME_COUNT, // looks around: 4 frames
+    LUNA_POSE_OOPS_1,
+    LUNA_POSE_OOPS_2,
+    LUNA_POSE_OOPS_3,
+    LUNA_POSE_STARTLED_0, // woken up: crouch, jump, come down: 6 frames
+    LUNA_POSE_STARTLED_1,
+    LUNA_POSE_STARTLED_2,
+    LUNA_POSE_STARTLED_3,
+    LUNA_POSE_STARTLED_4,
+    LUNA_POSE_STARTLED_5,
 };
+#define LUNA_STARTLED_FRAMES 6
+#define LUNA_STARTLED_MS (LUNA_STARTLED_FRAMES * LUNA_STARTLED_FRAME_MS)
 static uint8_t       session_top_wpm;           // highest WPM since power-up (not saved)
 static volatile uint16_t robot_keys;            // key presses since power-up (master: counted, slave: synced)
 static volatile uint16_t typed_keys;            // keys that could be shown in the history (master: counted, slave: synced)
@@ -552,24 +555,30 @@ void rgb_bl_display_init(void) {
 // Right display, layer 0: Luna the dog, reacting to typing.
 // Sprites and the idea: HellSingCoder (see luna_sprites.h).
 
-// z / Z shown above the sleeping dog. One byte per row, bit (w-1) is the leftmost pixel.
-static const uint8_t luna_z_small[4] = {0x7, 0x1, 0x2, 0x7};               // 3x4
-static const uint8_t luna_z_big[6]   = {0x1F, 0x01, 0x02, 0x04, 0x08, 0x1F}; // 5x6
-static const uint8_t luna_drop[7]    = {0x04, 0x04, 0x0A, 0x0A, 0x11, 0x11, 0x0E}; // 5x7 sweat drop (oops)
-static const uint8_t luna_excl[5]    = {0x3, 0x3, 0x3, 0x0, 0x3};                // 2x5 "!" (startled)
+// Animated poses: which sprite frame, how many screen pixels it is lifted off the ground, mirrored or not.
+typedef struct {
+    uint8_t frame;
+    uint8_t lift_px;
+    bool    flip;
+} luna_look_t;
 
-static void luna_draw_mask(const uint8_t *rows, uint8_t w, uint8_t h, uint16_t x, uint16_t y, uint8_t scale) {
-    for (uint8_t r = 0; r < h; r++) {
-        for (uint8_t c = 0; c < w; c++) {
-            if ((rows[r] >> (w - 1 - c)) & 1) {
-                qp_rect(surface, x + c * scale, y + r * scale, x + (c + 1) * scale - 1, y + (r + 1) * scale - 1, ui_hsv.h, ui_hsv.s, ui_hsv.v, true);
-            }
-        }
-    }
-}
+static const luna_look_t luna_looks[] = {
+    // oops: sits and looks left, right, left, right
+    {LUNA_SIT1, 0, false},
+    {LUNA_SIT1, 0, true},
+    {LUNA_SIT2, 0, false},
+    {LUNA_SIT2, 0, true},
+    // startled: crouch, jump up, peak, come down, sit
+    {LUNA_SNEAK1, 0, false},
+    {LUNA_RUN1, 16, false},
+    {LUNA_RUN2, 32, false},
+    {LUNA_RUN1, 16, false},
+    {LUNA_SIT1, 0, false},
+    {LUNA_SIT2, 0, false},
+};
 
-// Draw one 1-bit sprite frame (OLED page layout) scaled up, in the accent colour, lifted by lift_px screen pixels.
-static void luna_draw_sprite(uint8_t frame, uint8_t lift_px) {
+// Draw one 1-bit sprite frame (OLED page layout) scaled up, in the accent colour.
+static void luna_draw_sprite(uint8_t frame, uint8_t lift_px, bool flip) {
     const uint8_t *data = luna_frames[frame];
     const uint16_t top  = LUNA_Y - lift_px;
     for (uint8_t y = 0; y < LUNA_H; y++) {
@@ -585,7 +594,9 @@ static void luna_draw_sprite(uint8_t frame, uint8_t lift_px) {
             while (x_end + 1 < LUNA_W && ((pgm_read_byte(&data[page * LUNA_W + x_end + 1]) >> bit) & 1)) {
                 x_end++;
             }
-            qp_rect(surface, LUNA_X + x * LUNA_SCALE, top + y * LUNA_SCALE, LUNA_X + (x_end + 1) * LUNA_SCALE - 1, top + (y + 1) * LUNA_SCALE - 1, ui_hsv.h, ui_hsv.s, ui_hsv.v, true);
+            const uint16_t x0 = flip ? LUNA_X + (LUNA_W - 1 - x_end) * LUNA_SCALE : LUNA_X + x * LUNA_SCALE;
+            const uint16_t x1 = flip ? LUNA_X + (LUNA_W - x) * LUNA_SCALE - 1 : LUNA_X + (x_end + 1) * LUNA_SCALE - 1;
+            qp_rect(surface, x0, top + y * LUNA_SCALE, x1, top + (y + 1) * LUNA_SCALE - 1, ui_hsv.h, ui_hsv.s, ui_hsv.v, true);
             x = x_end + 1;
         }
     }
@@ -593,35 +604,11 @@ static void luna_draw_sprite(uint8_t frame, uint8_t lift_px) {
 
 static void luna_draw(uint8_t pose) {
     qp_rect(surface, 0, LUNA_AREA_Y, LCD_WIDTH - 1, LUNA_AREA_Y + LUNA_AREA_H - 1, 0, 0, 0, true);
-    switch (pose) {
-        case LUNA_POSE_SLEEP_A: // sitting, eyes shut, one small z
-            luna_draw_sprite(LUNA_SIT1, 0);
-            luna_draw_mask(luna_z_small, 3, 4, 106, 52, 3);
-            break;
-        case LUNA_POSE_SLEEP_B: // tail twitches, z grows into zZ
-            luna_draw_sprite(LUNA_SIT2, 0);
-            luna_draw_mask(luna_z_small, 3, 4, 102, 54, 3);
-            luna_draw_mask(luna_z_big, 5, 6, 112, 35, 3);
-            break;
-        case LUNA_POSE_OOPS_A: // nervous: a sweat drop beside the head, then it falls
-            luna_draw_sprite(LUNA_SIT1, 0);
-            luna_draw_mask(luna_drop, 5, 7, 110, 44, 3);
-            break;
-        case LUNA_POSE_OOPS_B:
-            luna_draw_sprite(LUNA_SIT2, 0);
-            luna_draw_mask(luna_drop, 5, 7, 110, 52, 3);
-            break;
-        case LUNA_POSE_STARTLED_A: // woken up: hops high with a "!"
-            luna_draw_sprite(LUNA_SIT1, 24);
-            luna_draw_mask(luna_excl, 2, 5, 114, 38, 4);
-            break;
-        case LUNA_POSE_STARTLED_B: // ... and comes down again
-            luna_draw_sprite(LUNA_SIT2, 8);
-            luna_draw_mask(luna_excl, 2, 5, 114, 44, 4);
-            break;
-        default:
-            luna_draw_sprite(pose, 0);
-            break;
+    if (pose < LUNA_FRAME_COUNT) {
+        luna_draw_sprite(pose, 0, false);
+    } else {
+        const luna_look_t *look = &luna_looks[pose - LUNA_FRAME_COUNT];
+        luna_draw_sprite(look->frame, look->lift_px, look->flip);
     }
     luna_pose_drawn = pose;
 }
@@ -642,8 +629,8 @@ static void luna_draw_stats(void) {
 }
 
 // Decide which pose Luna should be in right now.
-//   startled: a key just woke Luna from sleep (hop with a "!")
-//   oops   : 3+ Backspaces in a row (sweat drop)
+//   startled: a key just woke Luna from sleep (she jumps up)
+//   oops   : 3+ Backspaces in a row (she sits and looks around)
 //   sneak  : Ctrl / Alt / Gui held (shortcut)
 //   bark   : Shift held
 //   run    : typing at LUNA_RUN_WPM or more (faster frames from LUNA_FAST_WPM)
@@ -661,7 +648,7 @@ static void luna_update_pose(void) {
         luna_last_key_time = now;
     }
     if (keys != luna_keys_seen) {
-        if (luna_pose == LUNA_POSE_SLEEP_A || luna_pose == LUNA_POSE_SLEEP_B) {
+        if (luna_pose == LUNA_SLEEP1 || luna_pose == LUNA_SLEEP2) {
             luna_startled_until = now + LUNA_STARTLED_MS; // woken up by a key
         }
         luna_keys_seen     = keys;
@@ -676,12 +663,12 @@ static void luna_update_pose(void) {
     bool     typing = idle < LUNA_TYPING_MS;
     uint8_t  step;
 
-    if (now < luna_startled_until) {
-        step = (now / LUNA_STARTLED_FRAME_MS) & 1;
-        luna_pose = LUNA_POSE_STARTLED_A + step;
+    if (now < luna_startled_until) { // plays once, from the first frame
+        step = (now - (luna_startled_until - LUNA_STARTLED_MS)) / LUNA_STARTLED_FRAME_MS;
+        luna_pose = LUNA_POSE_STARTLED_0 + (step < LUNA_STARTLED_FRAMES ? step : LUNA_STARTLED_FRAMES - 1);
     } else if (oops) {
-        step = (now / LUNA_OOPS_FRAME_MS) & 1;
-        luna_pose = LUNA_POSE_OOPS_A + step;
+        step = (now / LUNA_OOPS_FRAME_MS) & 3;
+        luna_pose = LUNA_POSE_OOPS_0 + step;
     } else if (sneak) {
         step = (now / LUNA_SNEAK_FRAME_MS) & 1;
         luna_pose = LUNA_SNEAK1 + step;
@@ -699,7 +686,7 @@ static void luna_update_pose(void) {
         luna_pose = LUNA_WALK1 + step;
     } else if (idle > LUNA_SLEEP_MS) {
         step = (now / LUNA_SLEEP_FRAME_MS) & 1;
-        luna_pose = LUNA_POSE_SLEEP_A + step;
+        luna_pose = LUNA_SLEEP1 + step;
     } else {
         step = (now / LUNA_SIT_FRAME_MS) & 1;
         luna_pose = LUNA_SIT1 + step;
